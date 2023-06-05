@@ -1,4 +1,4 @@
-# Introducing the softlength (sol) activation function: A practical implementation of Occam's Razor
+# Introducing the softlength activation function: A practical implementation of Occam's razor
 
 Artificial Neural Networks (ANNs) traditionally function by accepting input `x`, transforming it through interconnected neural layers, and producing a probability distribution for output y. The uncertainty of `y` is determined by the magnitudes in the ANN's final layer, where larger magnitudes signify less uncertainty and conversely, smaller ones denote more.
 
