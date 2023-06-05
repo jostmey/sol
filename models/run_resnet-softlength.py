@@ -11,7 +11,7 @@
 import argparse
 import torchvision
 import torch
-import torchmetrics
+from SoftLength_v3 import *
 
 ##########################################################################################
 # Arguments
@@ -125,50 +125,114 @@ class ResNet(torch.nn.Module):
     )
 
     blocks = []
+    outputs = []
 
     blocks.append(block(64, 64, 1))
+    outputs.append(
+      torch.nn.Sequential(
+        torch.nn.AvgPool2d(7, stride=1),
+        torch.nn.Flatten(),
+        torch.nn.BatchNorm1d(64*50*50),
+        torch.nn.Linear(64*50*50, num_classes)
+      )
+    )
     for i in range(1, layers[0]):
       blocks.append(block(64, 64))
+      outputs.append(
+        torch.nn.Sequential(
+          torch.nn.AvgPool2d(7, stride=1),
+          torch.nn.Flatten(),
+          torch.nn.BatchNorm1d(64*50*50),
+          torch.nn.Linear(64*50*50, num_classes)
+        )
+      )
 
     downsample = torch.nn.Sequential(
       torch.nn.Conv2d(64, 128, kernel_size=1, stride=2),
       torch.nn.BatchNorm2d(128)
     )
     blocks.append(block(64, 128, 2, downsample=downsample))
+    outputs.append(
+      torch.nn.Sequential(
+        torch.nn.AvgPool2d(7, stride=1),
+        torch.nn.Flatten(),
+        torch.nn.BatchNorm1d(128*22*22),
+        torch.nn.Linear(128*22*22, num_classes)
+      )
+    )
     for i in range(1, layers[1]):
       blocks.append(block(128, 128))
+      outputs.append(
+        torch.nn.Sequential(
+          torch.nn.AvgPool2d(7, stride=1),
+          torch.nn.Flatten(),
+          torch.nn.BatchNorm1d(128*22*22),
+          torch.nn.Linear(128*22*22, num_classes)
+        )
+      )
 
     downsample = torch.nn.Sequential(
       torch.nn.Conv2d(128, 256, kernel_size=1, stride=2),
       torch.nn.BatchNorm2d(256)
     )
     blocks.append(block(128, 256, 2, downsample=downsample))
+    outputs.append(
+      torch.nn.Sequential(
+        torch.nn.AvgPool2d(7, stride=1),
+        torch.nn.Flatten(),
+        torch.nn.BatchNorm1d(256*8*8),
+        torch.nn.Linear(256*8*8, num_classes)
+      )
+    )
     for i in range(1, layers[2]):
       blocks.append(block(256, 256))
+      outputs.append(
+        torch.nn.Sequential(
+          torch.nn.AvgPool2d(7, stride=1),
+          torch.nn.Flatten(),
+          torch.nn.BatchNorm1d(256*8*8),
+          torch.nn.Linear(256*8*8, num_classes)
+        )
+      )
 
     downsample = torch.nn.Sequential(
       torch.nn.Conv2d(256, 512, kernel_size=1, stride=2),
       torch.nn.BatchNorm2d(512)
     )
     blocks.append(block(256, 512, 2, downsample=downsample))
+    outputs.append(
+      torch.nn.Sequential(
+        torch.nn.AvgPool2d(7, stride=1),
+        torch.nn.Flatten(),
+        torch.nn.BatchNorm1d(512),
+        torch.nn.Linear(512, num_classes)
+      )
+    )
     for i in range(1, layers[3]):
       blocks.append(block(512, 512))
+      outputs.append(
+        torch.nn.Sequential(
+          torch.nn.AvgPool2d(7, stride=1),
+          torch.nn.Flatten(),
+          torch.nn.BatchNorm1d(512),
+          torch.nn.Linear(512, num_classes)
+        )
+      )
 
     self.blocks = torch.nn.ModuleList(blocks)
+    self.outputs = torch.nn.ModuleList(outputs)
 
-    self.output = torch.nn.Sequential(
-      torch.nn.AvgPool2d(7, stride=1),
-      torch.nn.Flatten(),
-      torch.nn.BatchNorm1d(512),
-      torch.nn.Linear(512, num_classes)
-    )
+    self.softlength = SoftLength(width=4096)
 
   def forward(self, x):
     x = self.input(x)
-    for block in self.blocks:
+    o = []
+    for block, output in zip(self.blocks, self.outputs):
       x = block(x)
-    x = self.output(x)
-    return x
+      o.append(output(x))
+    o = torch.stack(o, axis=1)
+    p = self.softlength(o)
+    return p
 
 ##########################################################################################
 # Instantiate model, optimizer, and metrics
@@ -179,8 +243,8 @@ softmax = torch.nn.Softmax(dim=1).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=args.step)
 
-loss = torch.nn.CrossEntropyLoss()
-accuracy = torchmetrics.classification.MulticlassAccuracy(num_classes=10).to(device)
+loss = SoftLengthLoss(epsilon=1.0e-3).to(device)
+accuracy = SoftLengthAccuracy().to(device)
 
 ##########################################################################################
 # Run the model
@@ -199,9 +263,8 @@ for i in range(args.epochs):
   for xs_batch, ys_batch in iter(loader_train):
     xs_batch = xs_batch.to(device)
     ys_batch = ys_batch.to(device)
-    ls_batch = model(xs_batch)
-    ps_batch = softmax(ls_batch)
-    e_batch = loss(ls_batch, ys_batch)
+    ps_batch = model(xs_batch)
+    e_batch = loss(ps_batch, ys_batch)
     a_batch = accuracy(ps_batch, ys_batch)
     optimizer.zero_grad()
     e_batch.backward()
@@ -217,9 +280,8 @@ for i in range(args.epochs):
     for xs_batch, ys_batch in iter(loader_val):
       xs_batch = xs_batch.to(device)
       ys_batch = ys_batch.to(device)
-      ls_batch = model(xs_batch)
-      ps_batch = softmax(ls_batch)
-      e_batch = loss(ls_batch, ys_batch)
+      ps_batch = model(xs_batch)
+      e_batch = loss(ps_batch, ys_batch)
       a_batch = accuracy(ps_batch, ys_batch)
       fraction = float(ys_batch.shape[0])/float(len(dataset_val))
       e_val += fraction*e_batch.detach()
@@ -244,9 +306,8 @@ with torch.no_grad():
   for xs_batch, ys_batch in iter(loader_test):
     xs_batch = xs_batch.to(device)
     ys_batch = ys_batch.to(device)
-    ls_batch = model(xs_batch)
-    ps_batch = softmax(ls_batch)
-    e_batch = loss(ls_batch, ys_batch)
+    ps_batch = model(xs_batch)
+    e_batch = loss(ps_batch, ys_batch)
     a_batch = accuracy(ps_batch, ys_batch)
     fraction = float(ys_batch.shape[0])/float(len(dataset_test))
     e_test += fraction*e_batch.detach()
