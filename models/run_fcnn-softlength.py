@@ -104,13 +104,13 @@ class Model(torch.nn.Module):
     n0 = self.norm0(x)
 
     l1 = self.layer1(n0)
-    o1 = self.output0(l1)
+    o1 = self.output1(l1)
 
     l2 = self.layer2(l1)
-    o2 = self.output1(l2)
+    o2 = self.output2(l2)
 
     l3 = self.layer3(l2)
-    o3 = self.output2(l3)
+    o3 = self.output3(l3)
 
     o = torch.stack([ o1, o2, o3 ], axis=1)
     p = self.softlength(o)
