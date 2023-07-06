@@ -11,7 +11,7 @@
 import argparse
 import torchvision
 import torch
-from SoftLength_v3 import *
+from SoftLength import *
 
 ##########################################################################################
 # Arguments
